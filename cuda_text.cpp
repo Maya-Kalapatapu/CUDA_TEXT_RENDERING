@@ -7,6 +7,7 @@
 #include <string>
 #include <iostream>
 #include <sstream>
+#include <algorithm> // for std::max
 
 namespace cuda {
 
@@ -25,13 +26,22 @@ void cuda_text::draw_text(const std::string& text) {
         return;
     }
 
+    // 🔧 Calculate adaptive line height based on glyph height
+    int max_glyph_height = 0;
+    for (const auto& [ch, glyph] : atlas) {
+        max_glyph_height = std::max(max_glyph_height, glyph.height);
+    }
+
+    float line_spacing_factor = 1.2f;
+    int line_height = static_cast<int>(max_glyph_height * line_spacing_factor);
+
+    // 🧱 Margins and starting Y
     int margin_left = 100;
     int margin_top  = screen_height - 100;
-    int line_height = 32;
+    int line_y = margin_top;
 
     std::istringstream stream(text);
     std::string line;
-    int line_y = margin_top;
 
     while (std::getline(stream, line)) {
         int cursor_x = margin_left;
@@ -53,7 +63,7 @@ void cuda_text::draw_text(const std::string& text) {
             cursor_x += g.advance;
         }
 
-        line_y -= line_height; // move to next line
+        line_y -= line_height; // adaptive spacing between lines
     }
 
     cudaMalloc(&d_bitmap, render_data.flat_bitmap.size());
