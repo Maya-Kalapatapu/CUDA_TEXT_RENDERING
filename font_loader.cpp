@@ -4,43 +4,45 @@
 #include <iostream>
 #include <cstring>
 
-static FT_Library ft;
-static FT_Face face;
-
-bool load_glyph_bitmap(char character, GlyphBitmap& out) {
-    static bool initialized = false;
-
-    if (!initialized) {
-        if (FT_Init_FreeType(&ft)) {
-            std::cerr << "Could not init FreeType library\n";
-            return false;
-        }
-
-        const char* fontPath = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-        if (FT_New_Face(ft, fontPath, 0, &face)) {
-            std::cerr << "Could not open " << fontPath << "\n";
-            return false;
-        }
-
-        FT_Set_Pixel_Sizes(face, 0, 48);  // Set font size to 48px
-        initialized = true;
-    }
-
-    if (FT_Load_Char(face, character, FT_LOAD_RENDER)) {
-        std::cerr << "Could not load character '" << character << "'\n";
+bool load_glyphs(const char* fontPath, const std::string& text, GlyphAtlas& atlas) {
+    FT_Library ft;
+    if (FT_Init_FreeType(&ft)) {
+        std::cerr << "Could not init FreeType\n";
         return false;
     }
 
-    out.width = face->glyph->bitmap.width;
-    out.height = face->glyph->bitmap.rows;
-    out.pitch = face->glyph->bitmap.pitch;
-    out.buffer = new unsigned char[out.width * out.height];
-    std::memcpy(out.buffer, face->glyph->bitmap.buffer, out.width * out.height);
-    
+    FT_Face face;
+    if (FT_New_Face(ft, fontPath, 0, &face)) {
+        std::cerr << "Could not open font\n";
+        return false;
+    }
 
+    FT_Set_Pixel_Sizes(face, 0, 48);
+
+    for (char c : text) {
+        if (atlas.count(c)) continue; // Skip if already loaded
+
+        if (FT_Load_Char(face, c, FT_LOAD_RENDER)) {
+            std::cerr << "Failed to load glyph: " << c << "\n";
+            continue;
+        }
+
+        Glyph g;
+        g.width = face->glyph->bitmap.width;
+        g.height = face->glyph->bitmap.rows;
+        g.pitch = face->glyph->bitmap.pitch;
+        g.bearingX = face->glyph->bitmap_left;
+        g.bearingY = face->glyph->bitmap_top;
+        g.advance = face->glyph->advance.x >> 6;
+
+        size_t size = g.width * g.height;
+        g.bitmap.resize(size);
+        memcpy(g.bitmap.data(), face->glyph->bitmap.buffer, size);
+
+        atlas[c] = g;
+    }
+
+    FT_Done_Face(face);
+    FT_Done_FreeType(ft);
     return true;
-}
-
-void free_glyph_bitmap(GlyphBitmap& bmp) {
-    delete[] bmp.buffer;
 }

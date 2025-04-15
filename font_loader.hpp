@@ -1,12 +1,19 @@
 #pragma once
 #include <cstdint>
+#include <vector>
+#include <map>
+#include <string>
 
-struct GlyphBitmap {
+struct Glyph {
     int width;
     int height;
     int pitch;
-    unsigned char* buffer;
+    int bearingX;
+    int bearingY;
+    int advance;
+    std::vector<unsigned char> bitmap;
 };
 
-bool load_glyph_bitmap(char character, GlyphBitmap& out);
-void free_glyph_bitmap(GlyphBitmap& bmp);
+using GlyphAtlas = std::map<char, Glyph>;
+
+bool load_glyphs(const char* fontPath, const std::string& text, GlyphAtlas& atlas);

@@ -3,13 +3,21 @@
 #include <iostream>
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
+#include <vector>
+#include <map>
+#include <string>
+
 #include "font_loader.hpp"
 #include "cuda_renderer.cuh"
-#include "font_loader.hpp"
-#include <cuda_runtime.h>
 
-unsigned char* d_glyph_bitmap = nullptr;
-int glyph_w = 0, glyph_h = 0;
+struct RenderData {
+    std::vector<unsigned char> flat_bitmap;
+    std::vector<GlyphInfo> glyphs;
+};
+
+unsigned char* d_bitmap = nullptr;
+GlyphInfo* d_glyphs = nullptr;
+RenderData renderData;
 
 GLuint pbo, tex;
 cudaGraphicsResource* cuda_pbo_resource;
@@ -23,7 +31,10 @@ void render() {
     cudaGraphicsMapResources(1, &cuda_pbo_resource, 0);
     cudaGraphicsResourceGetMappedPointer((void**)&dptr, &size, cuda_pbo_resource);
 
-    launch_text_kernel(dptr, WIDTH, HEIGHT, d_glyph_bitmap, glyph_w, glyph_h);
+    uchar4 text_color = make_uchar4(0, 255, 0, 255);  // Green text
+    uchar4 bg_color   = make_uchar4(30, 30, 30, 255); // Dark gray background
+
+    launch_text_kernel(dptr, WIDTH, HEIGHT, d_bitmap, d_glyphs, renderData.glyphs.size(), text_color, bg_color);
 
     cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0);
 }
@@ -64,23 +75,46 @@ int main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, WIDTH, HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
-    GlyphBitmap glyph;
-    if (!load_glyph_bitmap('A', glyph)) {
-        std::cerr << "Failed to load glyph\n";
+    // Load all glyphs for the string
+    GlyphAtlas atlas;
+    std::string text = "Hello, CUDA!";
+    const char* fontPath = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+
+    if (!load_glyphs(fontPath, text, atlas)) {
+        std::cerr << "Failed to load glyphs\n";
         return -1;
     }
 
-    std::cout << "Loaded glyph 'A': "
-            << glyph.width << "x" << glyph.height
-            << ", pitch: " << glyph.pitch << std::endl;
+    int cursor_x = 100;  // Starting X
+    int cursor_y = 300;  // Baseline Y
 
-    glyph_w = glyph.width;
-    glyph_h = glyph.height;
+    for (char c : text) {
+        if (!atlas.count(c)) continue;
+        const Glyph& g = atlas[c];
 
-    cudaMalloc(&d_glyph_bitmap, glyph_w * glyph_h);
-    cudaMemcpy(d_glyph_bitmap, glyph.buffer, glyph_w * glyph_h, cudaMemcpyHostToDevice);
+        GlyphInfo info;
+        info.x = cursor_x + g.bearingX;
+        info.y = cursor_y - g.bearingY;
+        info.width = g.width;
+        info.height = g.height;
+        info.bitmap_offset = renderData.flat_bitmap.size();
 
-    free_glyph_bitmap(glyph);
+        renderData.flat_bitmap.insert(
+            renderData.flat_bitmap.end(),
+            g.bitmap.begin(),
+            g.bitmap.end()
+        );
+
+        renderData.glyphs.push_back(info);
+        cursor_x += g.advance;
+    }
+
+    // Upload glyph bitmap and metadata to CUDA
+    cudaMalloc(&d_bitmap, renderData.flat_bitmap.size());
+    cudaMemcpy(d_bitmap, renderData.flat_bitmap.data(), renderData.flat_bitmap.size(), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_glyphs, renderData.glyphs.size() * sizeof(GlyphInfo));
+    cudaMemcpy(d_glyphs, renderData.glyphs.data(), renderData.glyphs.size() * sizeof(GlyphInfo), cudaMemcpyHostToDevice);
 
     while (!glfwWindowShouldClose(window)) {
         render();
