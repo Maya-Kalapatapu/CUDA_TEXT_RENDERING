@@ -1,29 +1,31 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
-#include <vector>
-#include <map>
-#include <string>
 
-#include "font_loader.hpp"
+#include "cuda_text.hpp"
 #include "cuda_renderer.cuh"
-
-struct RenderData {
-    std::vector<unsigned char> flat_bitmap;
-    std::vector<GlyphInfo> glyphs;
-};
-
-unsigned char* d_bitmap = nullptr;
-GlyphInfo* d_glyphs = nullptr;
-RenderData renderData;
 
 GLuint pbo, tex;
 cudaGraphicsResource* cuda_pbo_resource;
 
 const int WIDTH = 800;
 const int HEIGHT = 600;
+
+unsigned char* d_bitmap = nullptr;
+GlyphInfo* d_glyphs = nullptr;
+int glyph_count = 0;
+
+// Load an entire file into a string
+std::string load_file(const std::string& path) {
+    std::ifstream in(path);
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    return buffer.str();
+}
 
 void render() {
     uchar4* dptr;
@@ -32,9 +34,9 @@ void render() {
     cudaGraphicsResourceGetMappedPointer((void**)&dptr, &size, cuda_pbo_resource);
 
     uchar4 text_color = make_uchar4(0, 255, 0, 255);  // Green text
-    uchar4 bg_color   = make_uchar4(30, 30, 30, 255); // Dark gray background
+    uchar4 bg_color   = make_uchar4(30, 30, 30, 255); // Dark background
 
-    launch_text_kernel(dptr, WIDTH, HEIGHT, d_bitmap, d_glyphs, renderData.glyphs.size(), text_color, bg_color);
+    launch_text_kernel(dptr, WIDTH, HEIGHT, d_bitmap, d_glyphs, glyph_count, text_color, bg_color);
 
     cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0);
 }
@@ -57,7 +59,7 @@ void display() {
 
 int main() {
     if (!glfwInit()) return -1;
-    GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "CUDA Font Renderer", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "CUDA Text Renderer", NULL, NULL);
     if (!window) { glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
     glewInit();
@@ -66,7 +68,6 @@ int main() {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, WIDTH * HEIGHT * 4, 0, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-
     cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource, pbo, cudaGraphicsMapFlagsWriteDiscard);
 
     glGenTextures(1, &tex);
@@ -75,46 +76,22 @@ int main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, WIDTH, HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
-    // Load all glyphs for the string
-    GlyphAtlas atlas;
-    std::string text = "Hello, CUDA!";
-    const char* fontPath = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+    // Load war-and-peace.txt
+    std::string full_text = load_file("documents/sample_5_pages.txt");
 
-    if (!load_glyphs(fontPath, text, atlas)) {
-        std::cerr << "Failed to load glyphs\n";
-        return -1;
-    }
+    // Clip to visible portion (first ~2000 chars)
+    std::string visible_text = full_text.substr(0, 2000);
 
-    int cursor_x = 100;  // Starting X
-    int cursor_y = 300;  // Baseline Y
+    // Render using CUDA
+    cuda::cuda_text text_renderer;
+    text_renderer.init(WIDTH, HEIGHT);
+    text_renderer.draw_text(visible_text);
 
-    for (char c : text) {
-        if (!atlas.count(c)) continue;
-        const Glyph& g = atlas[c];
-
-        GlyphInfo info;
-        info.x = cursor_x + g.bearingX;
-        info.y = cursor_y - g.bearingY;
-        info.width = g.width;
-        info.height = g.height;
-        info.bitmap_offset = renderData.flat_bitmap.size();
-
-        renderData.flat_bitmap.insert(
-            renderData.flat_bitmap.end(),
-            g.bitmap.begin(),
-            g.bitmap.end()
-        );
-
-        renderData.glyphs.push_back(info);
-        cursor_x += g.advance;
-    }
-
-    // Upload glyph bitmap and metadata to CUDA
-    cudaMalloc(&d_bitmap, renderData.flat_bitmap.size());
-    cudaMemcpy(d_bitmap, renderData.flat_bitmap.data(), renderData.flat_bitmap.size(), cudaMemcpyHostToDevice);
-
-    cudaMalloc(&d_glyphs, renderData.glyphs.size() * sizeof(GlyphInfo));
-    cudaMemcpy(d_glyphs, renderData.glyphs.data(), renderData.glyphs.size() * sizeof(GlyphInfo), cudaMemcpyHostToDevice);
+    // Link renderer data to global kernel inputs
+    d_bitmap = text_renderer.get_bitmap();
+    d_glyphs = text_renderer.get_glyphs();
+    glyph_count = text_renderer.get_glyph_count();
+    std::cout << "Glyphs loaded: " << glyph_count << std::endl; //debug    
 
     while (!glfwWindowShouldClose(window)) {
         render();
