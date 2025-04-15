@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <iostream>
+#include <sstream>
 
 namespace cuda {
 
@@ -24,24 +25,35 @@ void cuda_text::draw_text(const std::string& text) {
         return;
     }
 
-    int cursor_x = 100;
-    int cursor_y = 300;
+    int margin_left = 100;
+    int margin_top  = screen_height - 100;
+    int line_height = 32;
 
-    for (char c : text) {
-        if (!atlas.count(c)) continue;
-        const Glyph& g = atlas[c];
+    std::istringstream stream(text);
+    std::string line;
+    int line_y = margin_top;
 
-        GlyphInfo info;
-        info.x = cursor_x + g.bearingX;
-        info.y = cursor_y - g.bearingY;
-        info.width = g.width;
-        info.height = g.height;
-        info.bitmap_offset = render_data.flat_bitmap.size();
+    while (std::getline(stream, line)) {
+        int cursor_x = margin_left;
 
-        render_data.flat_bitmap.insert(render_data.flat_bitmap.end(), g.bitmap.begin(), g.bitmap.end());
-        render_data.glyphs.push_back(info);
+        for (char c : line) {
+            if (!atlas.count(c)) continue;
+            const Glyph& g = atlas[c];
 
-        cursor_x += g.advance;
+            GlyphInfo info;
+            info.x = cursor_x + g.bearingX;
+            info.y = line_y - g.bearingY;
+            info.width = g.width;
+            info.height = g.height;
+            info.bitmap_offset = render_data.flat_bitmap.size();
+
+            render_data.flat_bitmap.insert(render_data.flat_bitmap.end(), g.bitmap.begin(), g.bitmap.end());
+            render_data.glyphs.push_back(info);
+
+            cursor_x += g.advance;
+        }
+
+        line_y -= line_height; // move to next line
     }
 
     cudaMalloc(&d_bitmap, render_data.flat_bitmap.size());
@@ -49,8 +61,6 @@ void cuda_text::draw_text(const std::string& text) {
 
     cudaMalloc(&d_glyphs, render_data.glyphs.size() * sizeof(GlyphInfo));
     cudaMemcpy(d_glyphs, render_data.glyphs.data(), render_data.glyphs.size() * sizeof(GlyphInfo), cudaMemcpyHostToDevice);
-
-    // Rendering call is done externally, using these buffers
 }
 
 void cuda_text::cleanup() {
