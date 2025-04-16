@@ -3,18 +3,18 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <vector>
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
 
-#include "cuda_text.hpp"
-#include "cuda_renderer.cuh"
-#include "font_loader.hpp"
+#include "portable_doc.hpp"
+#include "cuda_text_wrapper.hpp"
 #include "page_manager.hpp"
+#include "font_loader.hpp"
+#include "cuda_renderer.cuh"
 
 const int PAGE_WIDTH = 816;
 const int PAGE_HEIGHT = 1056;
-const int MARGIN_TOP = 100;
-const int MARGIN_BOTTOM = 100;
 
 GLuint pbo, tex;
 cudaGraphicsResource* cuda_pbo_resource;
@@ -23,31 +23,22 @@ unsigned char* d_bitmap = nullptr;
 GlyphInfo* d_glyphs = nullptr;
 int glyph_count = 0;
 
-std::vector<std::string> split_into_lines(const std::string& text) {
-    std::istringstream stream(text);
-    std::string line;
-    std::vector<std::string> lines;
-    while (std::getline(stream, line)) {
-        lines.push_back(line);
-    }
-    return lines;
-}
-
 std::string load_file(const std::string& path) {
     std::ifstream in(path);
+    if (!in) {
+        std::cerr << "Failed to open file: " << path << std::endl;
+        return "";
+    }
     std::stringstream buffer;
     buffer << in.rdbuf();
     return buffer.str();
 }
 
-void render() {
+void render(uchar4 text_color, uchar4 bg_color) {
     uchar4* dptr;
     size_t size;
     cudaGraphicsMapResources(1, &cuda_pbo_resource, 0);
     cudaGraphicsResourceGetMappedPointer((void**)&dptr, &size, cuda_pbo_resource);
-
-    uchar4 text_color = make_uchar4(0, 255, 0, 255);
-    uchar4 bg_color   = make_uchar4(30, 30, 30, 255);
 
     launch_text_kernel(dptr, PAGE_WIDTH, PAGE_HEIGHT, d_bitmap, d_glyphs, glyph_count, text_color, bg_color);
 
@@ -70,18 +61,20 @@ void display() {
     glEnd();
 }
 
-int main() {
+int main(int argc, char** argv) {
     if (!glfwInit()) return -1;
-    GLFWwindow* window = glfwCreateWindow(PAGE_WIDTH, PAGE_HEIGHT, "CUDA Text Renderer", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(PAGE_WIDTH, PAGE_HEIGHT, "CUDA PortableDoc Renderer", NULL, NULL);
     if (!window) { glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
     glewInit();
 
-    // ✅ Set font size and calculate lines per page
-    config.font_size = 20;
-    float line_spacing_factor = 1.2f;
-    int line_height = static_cast<int>(config.font_size * line_spacing_factor);
-    int usable_height = PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
+    config.font_size = 16;
+    uchar4 text_color = make_uchar4(255, 255, 255, 255);
+    uchar4 bg_color = make_uchar4(0, 0, 0, 255);
+
+    float spacing = 1.2f;
+    int line_height = static_cast<int>(config.font_size * spacing);
+    int usable_height = PAGE_HEIGHT - 100 - 100;
     int lines_per_page = usable_height / line_height;
 
     glGenBuffers(1, &pbo);
@@ -96,13 +89,25 @@ int main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, PAGE_WIDTH, PAGE_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
-    std::string full_text = load_file("documents/sample_doc_a4.txt");
-    std::vector<std::string> all_lines = split_into_lines(full_text);
+    std::string filepath = "documents/sample_long.txt";
+    if (argc > 1) {
+        filepath = argv[1];
+        std::cout << "Loading: " << filepath << std::endl;
+    }
 
-    PageManager pager(all_lines.size(), lines_per_page);
+    std::string content = load_file(filepath);
+    if (content.empty()) {
+        content = "Default content. No file loaded.";
+    }
 
-    cuda::cuda_text text_renderer;
-    text_renderer.init(PAGE_WIDTH, PAGE_HEIGHT);
+    portable_doc::portable_doc doc;
+    doc.set_text(content);
+    doc.convert_text_to_pages(content, 0);
+
+    uint32_t page_index = 0;
+
+    portable_doc::cuda_text_wrapper renderer;
+    renderer.init();
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -111,24 +116,30 @@ int main() {
                     glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
 
         if (ctrl && glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
-            pager.next_page();
+            if (page_index + 1 < doc.get_num_pages()) {
+                page_index++;
+            }
             glfwWaitEventsTimeout(0.2);
         }
 
         if (ctrl && glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
-            pager.prev_page();
+            if (page_index > 0) {
+                page_index--;
+            }
             glfwWaitEventsTimeout(0.2);
         }
 
-        int start_line_index = pager.get_start_line_index();
+        portable_doc::page current_page = doc.get_page(page_index);
+        portable_doc::section_style style = doc.get_section_style(doc.get_section_index(page_index));
 
-        text_renderer.cleanup();
-        text_renderer.draw_text(full_text, start_line_index, lines_per_page);
-        d_bitmap = text_renderer.get_bitmap();
-        d_glyphs = text_renderer.get_glyphs();
-        glyph_count = text_renderer.get_glyph_count();
+        renderer.cleanup();
+        renderer.draw_page(doc, current_page, style, text_color, bg_color);
 
-        render();
+        d_bitmap = renderer.get_bitmap();
+        d_glyphs = renderer.get_glyphs();
+        glyph_count = renderer.get_glyph_count();
+
+        render(text_color, bg_color);
         display();
         glfwSwapBuffers(window);
     }

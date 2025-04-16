@@ -1,13 +1,9 @@
 #include "cuda_text.hpp"
-#include "font_loader.hpp"
-#include "cuda_renderer.cuh"
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
-#include <vector>
-#include <string>
-#include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <iostream>
 
 namespace cuda {
 
@@ -19,7 +15,11 @@ void cuda_text::init(int width, int height) {
     screen_height = height;
 }
 
-void cuda_text::draw_text(const std::string& text, int start_line_index, int max_lines) {
+void cuda_text::draw_text(const std::string& text,
+                          int start_line_index,
+                          int max_lines,
+                          uchar4 text_color,
+                          uchar4 bg_color) {
     render_data.flat_bitmap.clear();
     render_data.glyphs.clear();
 
@@ -34,10 +34,9 @@ void cuda_text::draw_text(const std::string& text, int start_line_index, int max
         max_glyph_height = std::max(max_glyph_height, glyph.height);
     }
 
-    float line_spacing_factor = 1.2f;
-    int line_height = static_cast<int>(max_glyph_height * line_spacing_factor);
+    float spacing = 1.2f;
+    int line_height = static_cast<int>(max_glyph_height * spacing);
 
-    // ✅ Define even margins
     int margin_top = 100;
     int margin_bottom = 100;
     int margin_left = 100;
@@ -64,17 +63,10 @@ void cuda_text::draw_text(const std::string& text, int start_line_index, int max
 
         while (wordstream >> word) {
             int word_width = 0;
-
             for (char c : word) {
-                if (atlas.count(c)) {
-                    word_width += atlas[c].advance;
-                }
+                if (atlas.count(c)) word_width += atlas[c].advance;
             }
-
-            // Include space if not first word
-            if (!current_line.empty()) {
-                word_width += atlas[' '].advance;
-            }
+            if (!current_line.empty()) word_width += atlas[' '].advance;
 
             if (line_width + word_width > usable_width) {
                 all_lines.push_back(current_line);
@@ -92,7 +84,6 @@ void cuda_text::draw_text(const std::string& text, int start_line_index, int max
         }
     }
 
-    // Now draw only the visible range
     int line_index = 0;
     for (int i = start_line_index; i < static_cast<int>(all_lines.size()) && line_index < max_lines; ++i, ++line_index) {
         const std::string& line = all_lines[i];
@@ -130,16 +121,8 @@ void cuda_text::cleanup() {
     if (d_glyphs) cudaFree(d_glyphs);
 }
 
-unsigned char* cuda_text::get_bitmap() const {
-    return d_bitmap;
-}
+unsigned char* cuda_text::get_bitmap() const { return d_bitmap; }
+GlyphInfo* cuda_text::get_glyphs() const { return d_glyphs; }
+size_t cuda_text::get_glyph_count() const { return render_data.glyphs.size(); }
 
-GlyphInfo* cuda_text::get_glyphs() const {
-    return d_glyphs;
 }
-
-size_t cuda_text::get_glyph_count() const {
-    return render_data.glyphs.size();
-}
-
-} // namespace cuda
