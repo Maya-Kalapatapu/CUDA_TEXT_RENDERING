@@ -2,6 +2,8 @@
 #include <fstream>
 #include <iostream>
 #include <cstring>
+#include <sstream>
+
 
 namespace portable_doc {
 
@@ -59,15 +61,22 @@ void portable_doc::convert_text_to_pages(const std::string& text, uint32_t forma
     colors.push_back({1.0f, 1.0f, 1.0f, 1.0f});
     section_styles.push_back({816, 1056, 0, {100, 100, 100, 100}});
 
-    uint32_t index = 0;
-    while (index < chars.size()) {
-        lines.push_back({index, format_index});
-        index += 80;
+    std::istringstream stream(text);
+    std::string line;
+    uint32_t offset = 0;
+
+    // 🔁 Add one line per real text line
+    while (std::getline(stream, line)) {
+        lines.push_back({offset, format_index});
+        offset += line.length() + 1;  // +1 for newline
     }
 
+    // 🔁 Add one page per 50 lines
     for (uint32_t i = 0; i < lines.size(); i += 50) {
         pages.push_back({i, 0});
     }
+
+    std::cout << "✅ Generated " << pages.size() << " pages from " << lines.size() << " lines.\n";
 }
 
 void portable_doc::save(const char* filename) const {

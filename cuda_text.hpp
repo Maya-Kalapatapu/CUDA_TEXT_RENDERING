@@ -15,11 +15,14 @@ public:
     ~cuda_text();
 
     void init(int width, int height);
+
+    // ✅ Now using start_line_index as the cache key
     void draw_text(const std::string& text,
-                   int page_index,
+                   int start_line_index,
                    int max_lines,
                    uchar4 text_color,
                    uchar4 bg_color);
+
     void cleanup();
 
     unsigned char* get_bitmap() const;
@@ -39,7 +42,6 @@ private:
     };
 
     void cleanup_page(CachedPage& page);
-
     std::unordered_map<int, CachedPage> page_cache;
 
     unsigned char* d_bitmap = nullptr;

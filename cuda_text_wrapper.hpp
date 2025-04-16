@@ -20,6 +20,10 @@ public:
                    const RenderSettings& settings,
                    int start_line_index);
 
+    void preload_all_pages(const portable_doc& doc,
+                           const section_style& style,
+                           const RenderSettings& settings);
+
     unsigned char* get_bitmap() const;
     GlyphInfo* get_glyphs() const;
     size_t get_glyph_count() const;

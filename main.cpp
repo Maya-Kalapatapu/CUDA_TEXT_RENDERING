@@ -107,33 +107,31 @@ int main(int argc, char** argv) {
         std::cout << "✅ Saved .pdoc: documents/generated.pdoc\n";
     }
 
-    uint32_t current_page = 0;
     portable_doc::cuda_text_wrapper renderer;
     renderer.init();
+
+    auto style = doc.get_section_style(0);
+
+    // ✅ Preload all pages up front
+    renderer.preload_all_pages(doc, style, settings);
+
+    uint32_t current_page = 0;
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
         if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
-            if (current_page + 1 < doc.get_num_pages()) {
-                current_page++;
-                std::cout << "➡️ Page " << current_page << "\n";
-                glfwWaitEventsTimeout(0.2);
-            }
+            if (current_page + 1 < doc.get_num_pages()) current_page++;
+            glfwWaitEventsTimeout(0.2);
         }
 
         if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
-            if (current_page > 0) {
-                current_page--;
-                std::cout << "⬅️ Page " << current_page << "\n";
-                glfwWaitEventsTimeout(0.2);
-            }
+            if (current_page > 0) current_page--;
+            glfwWaitEventsTimeout(0.2);
         }
 
         const auto& page = doc.get_page(current_page);
-        const auto& style = doc.get_section_style(doc.get_section_index(current_page));
-
-        renderer.cleanup();
+        renderer.cleanup();  // Optional: remove if cache should persist between scrolls
         renderer.draw_page(doc, page, style, settings, page.line_index);
 
         d_bitmap = renderer.get_bitmap();

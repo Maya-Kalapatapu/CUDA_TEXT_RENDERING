@@ -20,6 +20,17 @@ void cuda_text::draw_text(const std::string& text,
                           int max_lines,
                           uchar4 text_color,
                           uchar4 bg_color) {
+    // ✅ Use start_line_index for caching
+    if (page_cache.count(start_line_index)) {
+        std::cout << "[CACHE HIT] line " << start_line_index << "\n";
+        const CachedPage& cached = page_cache[start_line_index];
+        d_bitmap = cached.d_bitmap;
+        d_glyphs = cached.d_glyphs;
+        return;
+    }
+
+    std::cout << "[CACHE MISS] line " << start_line_index << "\n";
+
     render_data.flat_bitmap.clear();
     render_data.glyphs.clear();
 
@@ -37,17 +48,9 @@ void cuda_text::draw_text(const std::string& text,
     float spacing = 1.2f;
     int line_height = static_cast<int>(max_glyph_height * spacing);
 
-    int margin_top = 100;
-    int margin_bottom = 100;
-    int margin_left = 100;
-    int margin_right = 100;
-
-    int usable_width = screen_width - margin_left - margin_right;
+    int margin_top = 100, margin_bottom = 100, margin_left = 100, margin_right = 100;
     int usable_height = screen_height - margin_top - margin_bottom;
-
-    if (max_lines <= 0) {
-        max_lines = usable_height / line_height;
-    }
+    if (max_lines <= 0) max_lines = usable_height / line_height;
 
     int line_y = margin_top;
 
@@ -55,7 +58,6 @@ void cuda_text::draw_text(const std::string& text,
     std::string paragraph;
     std::vector<std::string> all_lines;
 
-    // Break text into word-wrapped lines
     while (std::getline(stream, paragraph)) {
         std::istringstream wordstream(paragraph);
         std::string word, current_line;
@@ -63,12 +65,10 @@ void cuda_text::draw_text(const std::string& text,
 
         while (wordstream >> word) {
             int word_width = 0;
-            for (char c : word) {
-                if (atlas.count(c)) word_width += atlas[c].advance;
-            }
+            for (char c : word) if (atlas.count(c)) word_width += atlas[c].advance;
             if (!current_line.empty()) word_width += atlas[' '].advance;
 
-            if (line_width + word_width > usable_width) {
+            if (line_width + word_width > screen_width - margin_left - margin_right) {
                 all_lines.push_back(current_line);
                 current_line = word;
                 line_width = word_width;
@@ -79,12 +79,9 @@ void cuda_text::draw_text(const std::string& text,
             }
         }
 
-        if (!current_line.empty()) {
-            all_lines.push_back(current_line);
-        }
+        if (!current_line.empty()) all_lines.push_back(current_line);
     }
 
-    // ✅ Skip lines until start_line_index
     int line_index = 0;
     for (int i = start_line_index; i < static_cast<int>(all_lines.size()) && line_index < max_lines; ++i, ++line_index) {
         const std::string& line = all_lines[i];
@@ -110,23 +107,39 @@ void cuda_text::draw_text(const std::string& text,
         line_y += line_height;
     }
 
-    // Upload data to GPU
-    cudaMalloc(&d_bitmap, render_data.flat_bitmap.size());
-    cudaMemcpy(d_bitmap, render_data.flat_bitmap.data(), render_data.flat_bitmap.size(), cudaMemcpyHostToDevice);
+    CachedPage cached;
 
-    cudaMalloc(&d_glyphs, render_data.glyphs.size() * sizeof(GlyphInfo));
-    cudaMemcpy(d_glyphs, render_data.glyphs.data(), render_data.glyphs.size() * sizeof(GlyphInfo), cudaMemcpyHostToDevice);
+    cudaMalloc(&cached.d_bitmap, render_data.flat_bitmap.size());
+    cudaMemcpy(cached.d_bitmap, render_data.flat_bitmap.data(), render_data.flat_bitmap.size(), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&cached.d_glyphs, render_data.glyphs.size() * sizeof(GlyphInfo));
+    cudaMemcpy(cached.d_glyphs, render_data.glyphs.data(), render_data.glyphs.size() * sizeof(GlyphInfo), cudaMemcpyHostToDevice);
+
+    cached.glyph_count = render_data.glyphs.size();
+    page_cache[start_line_index] = cached;
+
+    d_bitmap = cached.d_bitmap;
+    d_glyphs = cached.d_glyphs;
+}
+
+void cuda_text::cleanup_page(CachedPage& page) {
+    if (page.d_bitmap) {
+        cudaFree(page.d_bitmap);
+        page.d_bitmap = nullptr;
+    }
+    if (page.d_glyphs) {
+        cudaFree(page.d_glyphs);
+        page.d_glyphs = nullptr;
+    }
 }
 
 void cuda_text::cleanup() {
-    if (d_bitmap) {
-        cudaFree(d_bitmap);
-        d_bitmap = nullptr;
+    for (auto& [_, page] : page_cache) {
+        cleanup_page(page);
     }
-    if (d_glyphs) {
-        cudaFree(d_glyphs);
-        d_glyphs = nullptr;
-    }
+    page_cache.clear();
+    d_bitmap = nullptr;
+    d_glyphs = nullptr;
 }
 
 unsigned char* cuda_text::get_bitmap() const { return d_bitmap; }

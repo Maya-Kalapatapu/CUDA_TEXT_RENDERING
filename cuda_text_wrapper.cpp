@@ -12,7 +12,7 @@ cuda_text_wrapper::cuda_text_wrapper() {}
 cuda_text_wrapper::~cuda_text_wrapper() {}
 
 void cuda_text_wrapper::init() {
-    text_renderer.init(816, 1056);  // Set default screen size
+    text_renderer.init(816, 1056);
 }
 
 void cuda_text_wrapper::draw_page(const portable_doc& doc,
@@ -43,9 +43,26 @@ void cuda_text_wrapper::draw_page(const portable_doc& doc,
     int usable_height = style.page_height - style.margins.top_margin - style.margins.bottom_margin;
     int lines_per_page = usable_height / line_height;
 
-    text_renderer.cleanup();
     text_renderer.draw_text(full_text, start_line_index, lines_per_page,
                             settings.text_color, settings.bg_color);
+}
+
+void cuda_text_wrapper::preload_all_pages(const portable_doc& doc,
+                                          const section_style& style,
+                                          const RenderSettings& settings) {
+    std::cout << "🚀 Preloading " << doc.get_num_pages() << " pages...\n";
+
+    for (int i = 0; i < doc.get_num_pages(); ++i) {
+        const auto& page = doc.get_page(i);
+
+        if (i % 100 == 0) {
+            std::cout << "   ↪️ Page " << i << "...\n";
+        }
+
+        draw_page(doc, page, style, settings, page.line_index);
+    }
+
+    std::cout << "✅ Preload complete.\n";
 }
 
 void cuda_text_wrapper::cleanup() {
