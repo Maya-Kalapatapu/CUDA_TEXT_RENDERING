@@ -1,8 +1,7 @@
 #pragma once
-#include <cstdint>
-#include <vector>
-#include <map>
 #include <string>
+#include <map>
+#include <vector>
 
 struct Glyph {
     int width;
@@ -15,5 +14,12 @@ struct Glyph {
 };
 
 using GlyphAtlas = std::map<char, Glyph>;
+
+// ✅ Configurable rendering parameters
+struct TextRenderConfig {
+    int font_size = 24;
+};
+
+extern TextRenderConfig config;
 
 bool load_glyphs(const char* fontPath, const std::string& text, GlyphAtlas& atlas);

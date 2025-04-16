@@ -13,6 +13,8 @@ __global__ void text_kernel(
     if (x >= screen_w || y >= screen_h) return;
 
     int pixel_idx = y * screen_w + x;
+
+    // ✅ Clear framebuffer to background color
     framebuffer[pixel_idx] = bg_color;
 
     for (int i = 0; i < glyph_count; ++i) {

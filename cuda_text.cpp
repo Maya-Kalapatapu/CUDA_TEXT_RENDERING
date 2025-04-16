@@ -7,7 +7,7 @@
 #include <string>
 #include <iostream>
 #include <sstream>
-#include <algorithm> // for std::max
+#include <algorithm>
 
 namespace cuda {
 
@@ -20,13 +20,18 @@ void cuda_text::init(int width, int height) {
 }
 
 void cuda_text::draw_text(const std::string& text, int start_line_index, int max_lines) {
+    // ✅ Clear layout data
+    render_data.flat_bitmap.clear();
+    render_data.glyphs.clear();
+
+    // Load all required glyphs
     GlyphAtlas atlas;
     if (!load_glyphs("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", text, atlas)) {
         std::cerr << "Failed to load glyphs\n";
         return;
     }
 
-    // 🔧 Calculate adaptive line height based on glyph height
+    // Measure glyph size for consistent spacing
     int max_glyph_height = 0;
     for (const auto& [ch, glyph] : atlas) {
         max_glyph_height = std::max(max_glyph_height, glyph.height);
@@ -35,24 +40,31 @@ void cuda_text::draw_text(const std::string& text, int start_line_index, int max
     float line_spacing_factor = 1.2f;
     int line_height = static_cast<int>(max_glyph_height * line_spacing_factor);
 
-    // 🧱 Margins and starting Y
+    // Set up margins and initial Y position
     int margin_left = 100;
-    int margin_top  = 100;
+    int margin_top = 100;
     int line_y = margin_top;
 
     std::istringstream stream(text);
     std::string line;
+    std::vector<std::string> lines;
 
     while (std::getline(stream, line)) {
-        int cursor_x = margin_left;
+        lines.push_back(line);
+    }
 
-        for (char c : line) {
+    int line_index = 0;
+    for (int i = start_line_index; i < static_cast<int>(lines.size()) && line_index < max_lines; ++i, ++line_index) {
+        int cursor_x = margin_left;
+        const std::string& current_line = lines[i];
+
+        for (char c : current_line) {
             if (!atlas.count(c)) continue;
             const Glyph& g = atlas[c];
 
             GlyphInfo info;
             info.x = cursor_x + g.bearingX;
-            info.y = line_y + max_glyph_height - g.bearingY;
+            info.y = line_y + max_glyph_height - g.bearingY;  // ✅ Correct alignment
             info.width = g.width;
             info.height = g.height;
             info.bitmap_offset = render_data.flat_bitmap.size();
@@ -63,9 +75,10 @@ void cuda_text::draw_text(const std::string& text, int start_line_index, int max
             cursor_x += g.advance;
         }
 
-        line_y += line_height; // adaptive spacing between lines
+        line_y += line_height;
     }
 
+    // Upload to GPU
     cudaMalloc(&d_bitmap, render_data.flat_bitmap.size());
     cudaMemcpy(d_bitmap, render_data.flat_bitmap.data(), render_data.flat_bitmap.size(), cudaMemcpyHostToDevice);
 

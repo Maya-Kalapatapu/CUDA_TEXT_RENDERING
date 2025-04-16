@@ -8,6 +8,7 @@
 
 #include "cuda_text.hpp"
 #include "cuda_renderer.cuh"
+#include "font_loader.hpp"
 
 GLuint pbo, tex;
 cudaGraphicsResource* cuda_pbo_resource;
@@ -69,6 +70,8 @@ int main() {
     if (!window) { glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
     glewInit();
+
+    config.font_size = 14; // or any size you like
 
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
