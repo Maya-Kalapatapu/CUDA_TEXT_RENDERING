@@ -1,6 +1,8 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include <iostream>
 #include "cuda_renderer.cuh"
+#include "glyph_info.hpp"
 
 __global__ void text_kernel(
     uchar4* framebuffer, int screen_w, int screen_h,
@@ -13,13 +15,10 @@ __global__ void text_kernel(
     if (x >= screen_w || y >= screen_h) return;
 
     int pixel_idx = y * screen_w + x;
-
-    // ✅ Clear framebuffer to background color
     framebuffer[pixel_idx] = bg_color;
 
     for (int i = 0; i < glyph_count; ++i) {
         GlyphInfo g = glyphs[i];
-
         int gx = x - g.x;
         int gy = y - g.y;
 
@@ -43,6 +42,11 @@ void launch_text_kernel(uchar4* framebuffer, int width, int height,
                         unsigned char* glyph_bitmaps,
                         GlyphInfo* glyphs, int glyph_count,
                         uchar4 text_color, uchar4 bg_color) {
+    if (!framebuffer || !glyph_bitmaps || !glyphs || glyph_count == 0) {
+        printf("⚠️ Skipping kernel launch due to invalid input\n");
+        return;
+    }
+
     dim3 block(16, 16);
     dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
 
@@ -51,4 +55,11 @@ void launch_text_kernel(uchar4* framebuffer, int width, int height,
         glyph_bitmaps, glyphs, glyph_count,
         text_color, bg_color
     );
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("❌ CUDA kernel error: %s\n", cudaGetErrorString(err));
+    }
+
+    cudaDeviceSynchronize();
 }

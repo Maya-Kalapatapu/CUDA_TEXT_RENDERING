@@ -2,7 +2,7 @@
 #include "font_loader.hpp"
 #include <cstdint>
 #include <glm/vec4.hpp>
-#include <iostream>  // ✅ Needed for std::cerr and std::cout
+#include <iostream>
 
 namespace portable_doc {
 
@@ -12,14 +12,14 @@ cuda_text_wrapper::cuda_text_wrapper() {}
 cuda_text_wrapper::~cuda_text_wrapper() {}
 
 void cuda_text_wrapper::init() {
-    text_renderer.init(816, 1056);  // Default A4 size
+    text_renderer.init(816, 1056);  // Set default screen size
 }
 
 void cuda_text_wrapper::draw_page(const portable_doc& doc,
-                                  const page& page,
+                                  const page& pg,
                                   const section_style& style,
-                                  const RenderSettings& settings) {
-    // ✅ Safe conversion of doc text to string
+                                  const RenderSettings& settings,
+                                  int start_line_index) {
     std::vector<char> raw_text = doc.get_text();
     std::string full_text;
 
@@ -30,20 +30,21 @@ void cuda_text_wrapper::draw_page(const portable_doc& doc,
         full_text = " ";
     }
 
-    const line& l = doc.get_line(page.line_index);
-    const format& fmt = doc.get_format(l.format_index);
-    const font& f = doc.get_font(fmt.font_index);
+    if (doc.get_num_pages() == 0 || doc.get_text().empty()) return;
+
+    auto line = doc.get_line(0);
+    auto fmt = doc.get_format(line.format_index);
+    auto fnt = doc.get_font(fmt.font_index);
 
     config.font_size = settings.font_size;
 
-    // Calculate layout from section + render settings
     float spacing = fmt.line_height;
     int line_height = static_cast<int>(settings.font_size * spacing);
     int usable_height = style.page_height - style.margins.top_margin - style.margins.bottom_margin;
     int lines_per_page = usable_height / line_height;
 
     text_renderer.cleanup();
-    text_renderer.draw_text(full_text, page.line_index, lines_per_page,
+    text_renderer.draw_text(full_text, start_line_index, lines_per_page,
                             settings.text_color, settings.bg_color);
 }
 

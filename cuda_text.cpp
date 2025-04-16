@@ -55,10 +55,10 @@ void cuda_text::draw_text(const std::string& text,
     std::string paragraph;
     std::vector<std::string> all_lines;
 
+    // Break text into word-wrapped lines
     while (std::getline(stream, paragraph)) {
-        std::string word;
         std::istringstream wordstream(paragraph);
-        std::string current_line;
+        std::string word, current_line;
         int line_width = 0;
 
         while (wordstream >> word) {
@@ -84,6 +84,7 @@ void cuda_text::draw_text(const std::string& text,
         }
     }
 
+    // ✅ Skip lines until start_line_index
     int line_index = 0;
     for (int i = start_line_index; i < static_cast<int>(all_lines.size()) && line_index < max_lines; ++i, ++line_index) {
         const std::string& line = all_lines[i];
@@ -109,6 +110,7 @@ void cuda_text::draw_text(const std::string& text,
         line_y += line_height;
     }
 
+    // Upload data to GPU
     cudaMalloc(&d_bitmap, render_data.flat_bitmap.size());
     cudaMemcpy(d_bitmap, render_data.flat_bitmap.data(), render_data.flat_bitmap.size(), cudaMemcpyHostToDevice);
 
@@ -117,8 +119,14 @@ void cuda_text::draw_text(const std::string& text,
 }
 
 void cuda_text::cleanup() {
-    if (d_bitmap) cudaFree(d_bitmap);
-    if (d_glyphs) cudaFree(d_glyphs);
+    if (d_bitmap) {
+        cudaFree(d_bitmap);
+        d_bitmap = nullptr;
+    }
+    if (d_glyphs) {
+        cudaFree(d_glyphs);
+        d_glyphs = nullptr;
+    }
 }
 
 unsigned char* cuda_text::get_bitmap() const { return d_bitmap; }

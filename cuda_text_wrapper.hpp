@@ -1,8 +1,8 @@
 #pragma once
 
 #include "portable_doc.hpp"
-#include "cuda_text.hpp"
 #include "render_settings.hpp"
+#include "cuda_text.hpp"
 
 namespace portable_doc {
 
@@ -12,11 +12,13 @@ public:
     ~cuda_text_wrapper();
 
     void init();
-    void draw_page(const portable_doc& doc,
-                   const page& page,
-                   const section_style& style,
-                   const RenderSettings& settings);
     void cleanup();
+
+    void draw_page(const portable_doc& doc,
+                   const page& pg,
+                   const section_style& style,
+                   const RenderSettings& settings,
+                   int start_line_index);
 
     unsigned char* get_bitmap() const;
     GlyphInfo* get_glyphs() const;

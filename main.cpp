@@ -9,7 +9,6 @@
 
 #include "portable_doc.hpp"
 #include "cuda_text_wrapper.hpp"
-#include "page_manager.hpp"
 #include "font_loader.hpp"
 #include "cuda_renderer.cuh"
 #include "render_settings.hpp"
@@ -41,8 +40,12 @@ void render(const RenderSettings& settings) {
     cudaGraphicsMapResources(1, &cuda_pbo_resource, 0);
     cudaGraphicsResourceGetMappedPointer((void**)&dptr, &size, cuda_pbo_resource);
 
-    launch_text_kernel(dptr, PAGE_WIDTH, PAGE_HEIGHT, d_bitmap, d_glyphs, glyph_count,
-                       settings.text_color, settings.bg_color);
+    if (!d_bitmap || !d_glyphs || glyph_count == 0) {
+        std::cerr << "⚠️ Skipping render due to invalid GPU buffers\n";
+    } else {
+        launch_text_kernel(dptr, PAGE_WIDTH, PAGE_HEIGHT, d_bitmap, d_glyphs, glyph_count,
+                           settings.text_color, settings.bg_color);
+    }
 
     cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0);
 }
@@ -88,7 +91,7 @@ int main(int argc, char** argv) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, PAGE_WIDTH, PAGE_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
-    std::string filepath = "documents/sample_long.txt";
+    std::string filepath = "documents/sample_numbered.txt";
     if (argc > 1) filepath = argv[1];
 
     portable_doc::portable_doc doc;
@@ -104,31 +107,34 @@ int main(int argc, char** argv) {
         std::cout << "✅ Saved .pdoc: documents/generated.pdoc\n";
     }
 
-    uint32_t page_index = 0;
+    uint32_t current_page = 0;
     portable_doc::cuda_text_wrapper renderer;
     renderer.init();
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
-                    glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
-
-        if (ctrl && glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
-            if (page_index + 1 < doc.get_num_pages()) page_index++;
-            glfwWaitEventsTimeout(0.2);
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
+            if (current_page + 1 < doc.get_num_pages()) {
+                current_page++;
+                std::cout << "➡️ Page " << current_page << "\n";
+                glfwWaitEventsTimeout(0.2);
+            }
         }
 
-        if (ctrl && glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
-            if (page_index > 0) page_index--;
-            glfwWaitEventsTimeout(0.2);
+        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
+            if (current_page > 0) {
+                current_page--;
+                std::cout << "⬅️ Page " << current_page << "\n";
+                glfwWaitEventsTimeout(0.2);
+            }
         }
 
-        portable_doc::page current_page = doc.get_page(page_index);
-        portable_doc::section_style style = doc.get_section_style(doc.get_section_index(page_index));
+        const auto& page = doc.get_page(current_page);
+        const auto& style = doc.get_section_style(doc.get_section_index(current_page));
 
         renderer.cleanup();
-        renderer.draw_page(doc, current_page, style, settings);
+        renderer.draw_page(doc, page, style, settings, page.line_index);
 
         d_bitmap = renderer.get_bitmap();
         d_glyphs = renderer.get_glyphs();

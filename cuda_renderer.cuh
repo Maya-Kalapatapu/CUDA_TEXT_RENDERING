@@ -1,11 +1,6 @@
 #pragma once
 #include <cuda_runtime.h>
-
-struct GlyphInfo {
-    int x, y;
-    int width, height;
-    int bitmap_offset;
-};
+#include "glyph_info.hpp"
 
 void launch_text_kernel(uchar4* framebuffer, int width, int height,
                         unsigned char* glyph_bitmaps,
