@@ -12,6 +12,7 @@
 #include "page_manager.hpp"
 #include "font_loader.hpp"
 #include "cuda_renderer.cuh"
+#include "render_settings.hpp"
 
 const int PAGE_WIDTH = 816;
 const int PAGE_HEIGHT = 1056;
@@ -34,13 +35,14 @@ std::string load_file(const std::string& path) {
     return buffer.str();
 }
 
-void render(uchar4 text_color, uchar4 bg_color) {
+void render(const RenderSettings& settings) {
     uchar4* dptr;
     size_t size;
     cudaGraphicsMapResources(1, &cuda_pbo_resource, 0);
     cudaGraphicsResourceGetMappedPointer((void**)&dptr, &size, cuda_pbo_resource);
 
-    launch_text_kernel(dptr, PAGE_WIDTH, PAGE_HEIGHT, d_bitmap, d_glyphs, glyph_count, text_color, bg_color);
+    launch_text_kernel(dptr, PAGE_WIDTH, PAGE_HEIGHT, d_bitmap, d_glyphs, glyph_count,
+                       settings.text_color, settings.bg_color);
 
     cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0);
 }
@@ -68,14 +70,11 @@ int main(int argc, char** argv) {
     glfwMakeContextCurrent(window);
     glewInit();
 
-    config.font_size = 16;
-    uchar4 text_color = make_uchar4(255, 255, 255, 255);
-    uchar4 bg_color = make_uchar4(0, 0, 0, 255);
-
-    float spacing = 1.2f;
-    int line_height = static_cast<int>(config.font_size * spacing);
-    int usable_height = PAGE_HEIGHT - 100 - 100;
-    int lines_per_page = usable_height / line_height;
+    RenderSettings settings;
+    settings.font_size = 16;
+    settings.line_spacing = 1.2f;
+    settings.text_color = make_uchar4(255, 255, 255, 255);
+    settings.bg_color = make_uchar4(0, 0, 0, 255);
 
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -90,22 +89,22 @@ int main(int argc, char** argv) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, PAGE_WIDTH, PAGE_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
     std::string filepath = "documents/sample_long.txt";
-    if (argc > 1) {
-        filepath = argv[1];
-        std::cout << "Loading: " << filepath << std::endl;
-    }
-
-    std::string content = load_file(filepath);
-    if (content.empty()) {
-        content = "Default content. No file loaded.";
-    }
+    if (argc > 1) filepath = argv[1];
 
     portable_doc::portable_doc doc;
-    doc.set_text(content);
-    doc.convert_text_to_pages(content, 0);
+
+    if (filepath.size() >= 5 && filepath.substr(filepath.size() - 5) == ".pdoc") {
+        doc.load(filepath.c_str());
+    } else {
+        std::string content = load_file(filepath);
+        if (content.empty()) content = "Fallback content.";
+        doc.set_text(content);
+        doc.convert_text_to_pages(content, 0);
+        doc.save("documents/generated.pdoc");
+        std::cout << "✅ Saved .pdoc: documents/generated.pdoc\n";
+    }
 
     uint32_t page_index = 0;
-
     portable_doc::cuda_text_wrapper renderer;
     renderer.init();
 
@@ -116,16 +115,12 @@ int main(int argc, char** argv) {
                     glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
 
         if (ctrl && glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
-            if (page_index + 1 < doc.get_num_pages()) {
-                page_index++;
-            }
+            if (page_index + 1 < doc.get_num_pages()) page_index++;
             glfwWaitEventsTimeout(0.2);
         }
 
         if (ctrl && glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
-            if (page_index > 0) {
-                page_index--;
-            }
+            if (page_index > 0) page_index--;
             glfwWaitEventsTimeout(0.2);
         }
 
@@ -133,13 +128,13 @@ int main(int argc, char** argv) {
         portable_doc::section_style style = doc.get_section_style(doc.get_section_index(page_index));
 
         renderer.cleanup();
-        renderer.draw_page(doc, current_page, style, text_color, bg_color);
+        renderer.draw_page(doc, current_page, style, settings);
 
         d_bitmap = renderer.get_bitmap();
         d_glyphs = renderer.get_glyphs();
         glyph_count = renderer.get_glyph_count();
 
-        render(text_color, bg_color);
+        render(settings);
         display();
         glfwSwapBuffers(window);
     }

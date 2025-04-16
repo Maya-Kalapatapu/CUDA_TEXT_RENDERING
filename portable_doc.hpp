@@ -64,6 +64,10 @@ public:
 
     void convert_text_to_pages(const std::string& text, uint32_t format_index);
 
+    // ✅ New
+    void save(const char* filename) const;
+    void load(const char* filename);
+
 private:
     std::vector<char> chars;
     std::vector<line> lines;

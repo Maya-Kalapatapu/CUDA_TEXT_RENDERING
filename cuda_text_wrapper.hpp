@@ -2,6 +2,7 @@
 
 #include "portable_doc.hpp"
 #include "cuda_text.hpp"
+#include "render_settings.hpp"
 
 namespace portable_doc {
 
@@ -11,14 +12,10 @@ public:
     ~cuda_text_wrapper();
 
     void init();
-    
-    // ✅ Corrected: no portable_doc:: prefix on these
     void draw_page(const portable_doc& doc,
                    const page& page,
                    const section_style& style,
-                   uchar4 text_color,
-                   uchar4 bg_color);
-
+                   const RenderSettings& settings);
     void cleanup();
 
     unsigned char* get_bitmap() const;
