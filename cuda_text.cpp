@@ -19,7 +19,7 @@ void cuda_text::init(int width, int height) {
     screen_height = height;
 }
 
-void cuda_text::draw_text(const std::string& text) {
+void cuda_text::draw_text(const std::string& text, int start_line_index, int max_lines) {
     GlyphAtlas atlas;
     if (!load_glyphs("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", text, atlas)) {
         std::cerr << "Failed to load glyphs\n";
@@ -37,7 +37,7 @@ void cuda_text::draw_text(const std::string& text) {
 
     // 🧱 Margins and starting Y
     int margin_left = 100;
-    int margin_top  = screen_height - 100;
+    int margin_top  = 100;
     int line_y = margin_top;
 
     std::istringstream stream(text);
@@ -52,7 +52,7 @@ void cuda_text::draw_text(const std::string& text) {
 
             GlyphInfo info;
             info.x = cursor_x + g.bearingX;
-            info.y = line_y - g.bearingY;
+            info.y = line_y + max_glyph_height - g.bearingY;
             info.width = g.width;
             info.height = g.height;
             info.bitmap_offset = render_data.flat_bitmap.size();
@@ -63,7 +63,7 @@ void cuda_text::draw_text(const std::string& text) {
             cursor_x += g.advance;
         }
 
-        line_y -= line_height; // adaptive spacing between lines
+        line_y += line_height; // adaptive spacing between lines
     }
 
     cudaMalloc(&d_bitmap, render_data.flat_bitmap.size());

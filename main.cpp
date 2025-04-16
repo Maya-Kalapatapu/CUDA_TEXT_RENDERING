@@ -15,11 +15,17 @@ cudaGraphicsResource* cuda_pbo_resource;
 const int WIDTH = 800;
 const int HEIGHT = 600;
 
+int start_line_index = 0;
+int lines_per_page = 30;
+
 unsigned char* d_bitmap = nullptr;
 GlyphInfo* d_glyphs = nullptr;
 int glyph_count = 0;
 
-// Load an entire file into a string
+bool scrolling_active = false;
+double scroll_timer = 0;
+double scroll_interval = 0.25;
+
 std::string load_file(const std::string& path) {
     std::ifstream in(path);
     std::stringstream buffer;
@@ -33,8 +39,8 @@ void render() {
     cudaGraphicsMapResources(1, &cuda_pbo_resource, 0);
     cudaGraphicsResourceGetMappedPointer((void**)&dptr, &size, cuda_pbo_resource);
 
-    uchar4 text_color = make_uchar4(0, 255, 0, 255);  // Green text
-    uchar4 bg_color   = make_uchar4(30, 30, 30, 255); // Dark background
+    uchar4 text_color = make_uchar4(0, 255, 0, 255);
+    uchar4 bg_color   = make_uchar4(30, 30, 30, 255);
 
     launch_text_kernel(dptr, WIDTH, HEIGHT, d_bitmap, d_glyphs, glyph_count, text_color, bg_color);
 
@@ -76,28 +82,41 @@ int main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, WIDTH, HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
-    // Load war-and-peace.txt
     std::string full_text = load_file("documents/sample_5_pages.txt");
 
-    // Clip to visible portion (first ~2000 chars)
-    std::string visible_text = full_text.substr(0, 2000);
-
-    // Render using CUDA
     cuda::cuda_text text_renderer;
     text_renderer.init(WIDTH, HEIGHT);
-    text_renderer.draw_text(visible_text);
-
-    // Link renderer data to global kernel inputs
-    d_bitmap = text_renderer.get_bitmap();
-    d_glyphs = text_renderer.get_glyphs();
-    glyph_count = text_renderer.get_glyph_count();
-    std::cout << "Glyphs loaded: " << glyph_count << std::endl; //debug    
 
     while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
+
+        bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                    glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+
+        if (ctrl && glfwGetKey(window, GLFW_KEY_PERIOD) == GLFW_PRESS) {
+            scrolling_active = !scrolling_active;
+            std::cout << (scrolling_active ? "Scroll ON" : "Scroll OFF") << std::endl;
+            glfwWaitEventsTimeout(0.2);
+        }
+
+        if (scrolling_active) {
+            double now = glfwGetTime();
+            if (now - scroll_timer > scroll_interval) {
+                start_line_index++;
+                scroll_timer = now;
+            }
+        }
+
+        // Re-draw page content every frame
+        text_renderer.cleanup();
+        text_renderer.draw_text(full_text, start_line_index, lines_per_page);
+        d_bitmap = text_renderer.get_bitmap();
+        d_glyphs = text_renderer.get_glyphs();
+        glyph_count = text_renderer.get_glyph_count();
+
         render();
         display();
         glfwSwapBuffers(window);
-        glfwPollEvents();
     }
 
     cudaGraphicsUnregisterResource(cuda_pbo_resource);

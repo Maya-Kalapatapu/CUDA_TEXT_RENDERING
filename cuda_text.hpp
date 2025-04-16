@@ -11,7 +11,7 @@ namespace cuda {
             ~cuda_text();
         
             void init(int width, int height);
-            void draw_text(const std::string& text);
+            void draw_text(const std::string& text, int start_line_index, int max_lines);
             void cleanup();
         
             // ✅ Getter methods
