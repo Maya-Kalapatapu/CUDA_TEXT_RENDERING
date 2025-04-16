@@ -9,23 +9,29 @@
 #include "cuda_text.hpp"
 #include "cuda_renderer.cuh"
 #include "font_loader.hpp"
+#include "page_manager.hpp"
+
+const int PAGE_WIDTH = 816;
+const int PAGE_HEIGHT = 1056;
+const int MARGIN_TOP = 100;
+const int MARGIN_BOTTOM = 100;
 
 GLuint pbo, tex;
 cudaGraphicsResource* cuda_pbo_resource;
-
-const int WIDTH = 800;
-const int HEIGHT = 600;
-
-int start_line_index = 0;
-int lines_per_page = 30;
 
 unsigned char* d_bitmap = nullptr;
 GlyphInfo* d_glyphs = nullptr;
 int glyph_count = 0;
 
-bool scrolling_active = false;
-double scroll_timer = 0;
-double scroll_interval = 0.25;
+std::vector<std::string> split_into_lines(const std::string& text) {
+    std::istringstream stream(text);
+    std::string line;
+    std::vector<std::string> lines;
+    while (std::getline(stream, line)) {
+        lines.push_back(line);
+    }
+    return lines;
+}
 
 std::string load_file(const std::string& path) {
     std::ifstream in(path);
@@ -43,7 +49,7 @@ void render() {
     uchar4 text_color = make_uchar4(0, 255, 0, 255);
     uchar4 bg_color   = make_uchar4(30, 30, 30, 255);
 
-    launch_text_kernel(dptr, WIDTH, HEIGHT, d_bitmap, d_glyphs, glyph_count, text_color, bg_color);
+    launch_text_kernel(dptr, PAGE_WIDTH, PAGE_HEIGHT, d_bitmap, d_glyphs, glyph_count, text_color, bg_color);
 
     cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0);
 }
@@ -51,7 +57,7 @@ void render() {
 void display() {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, PAGE_WIDTH, PAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, 0);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     glClear(GL_COLOR_BUFFER_BIT);
@@ -66,16 +72,21 @@ void display() {
 
 int main() {
     if (!glfwInit()) return -1;
-    GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "CUDA Text Renderer", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(PAGE_WIDTH, PAGE_HEIGHT, "CUDA Text Renderer", NULL, NULL);
     if (!window) { glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
     glewInit();
 
-    config.font_size = 14; // or any size you like
+    // ✅ Set font size and calculate lines per page
+    config.font_size = 20;
+    float line_spacing_factor = 1.2f;
+    int line_height = static_cast<int>(config.font_size * line_spacing_factor);
+    int usable_height = PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
+    int lines_per_page = usable_height / line_height;
 
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, WIDTH * HEIGHT * 4, 0, GL_DYNAMIC_DRAW);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, PAGE_WIDTH * PAGE_HEIGHT * 4, 0, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource, pbo, cudaGraphicsMapFlagsWriteDiscard);
 
@@ -83,12 +94,15 @@ int main() {
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, WIDTH, HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, PAGE_WIDTH, PAGE_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
-    std::string full_text = load_file("documents/sample_5_pages.txt");
+    std::string full_text = load_file("documents/sample_doc_a4.txt");
+    std::vector<std::string> all_lines = split_into_lines(full_text);
+
+    PageManager pager(all_lines.size(), lines_per_page);
 
     cuda::cuda_text text_renderer;
-    text_renderer.init(WIDTH, HEIGHT);
+    text_renderer.init(PAGE_WIDTH, PAGE_HEIGHT);
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -96,21 +110,18 @@ int main() {
         bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
                     glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
 
-        if (ctrl && glfwGetKey(window, GLFW_KEY_PERIOD) == GLFW_PRESS) {
-            scrolling_active = !scrolling_active;
-            std::cout << (scrolling_active ? "Scroll ON" : "Scroll OFF") << std::endl;
+        if (ctrl && glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
+            pager.next_page();
             glfwWaitEventsTimeout(0.2);
         }
 
-        if (scrolling_active) {
-            double now = glfwGetTime();
-            if (now - scroll_timer > scroll_interval) {
-                start_line_index++;
-                scroll_timer = now;
-            }
+        if (ctrl && glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
+            pager.prev_page();
+            glfwWaitEventsTimeout(0.2);
         }
 
-        // Re-draw page content every frame
+        int start_line_index = pager.get_start_line_index();
+
         text_renderer.cleanup();
         text_renderer.draw_text(full_text, start_line_index, lines_per_page);
         d_bitmap = text_renderer.get_bitmap();
